@@ -4,8 +4,9 @@ from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP, localcontext
 import hashlib
 import json
+from .resources import light_factors, resource_week, resource_display
 
-ENGINE_VERSION = "planning-core/0.1.0"
+ENGINE_VERSION = "planning-core/0.2.0"
 ACRE_M2 = Decimal("4046.8564224")
 GROUPS = ("leafy", "fruiting", "roots", "legumes")
 ZERO = Decimal(0)
@@ -45,15 +46,23 @@ def _calculate(snapshot):
     totals = defaultdict(lambda: ZERO)
     service_weeks = 0
     crop_totals = defaultdict(lambda: ZERO)
+    factors = light_factors(snapshot)
+    settings = inputs.get("resources") or {}
+    storage = D(settings["water"]["opening_storage_m3"]) if settings.get("water") else ZERO
+    water_deficit_weeks = labour_deficit_weeks = 0
+    resource_states = []
     for index in range(104):
         day = start + timedelta(weeks=index)
         end = day + timedelta(days=7)
         gross = {group: ZERO for group in GROUPS}
+        cohort_gross = {}
         for planting in inputs["plantings"]:
             harvest_start = date.fromisoformat(planting["harvest_start"])
             harvest_end = harvest_start + timedelta(weeks=planting["harvest_weeks"])
             overlap_days = max(0, (min(end, harvest_end) - max(day, harvest_start)).days)
             amount = D(planting["area_m2"]) * D(planting["gross_yield_kg_per_m2"]) * overlap_days / (planting["harvest_weeks"] * 7)
+            amount *= factors[planting["id"]]
+            cohort_gross[planting["id"]] = amount
             gross[planting["crop_group"]] += amount
             crop_totals[planting["crop"]] += amount
         groups = {}
@@ -66,6 +75,15 @@ def _calculate(snapshot):
             groups[group] = {"demand_kg": display(requested, 3), "gross_kg": display(gross[group], 3),
                 "marketable_kg": display(marketable, 3), "delivered_kg": display(fulfilled, 3),
                 "shortfall_kg": display(requested - fulfilled, 3), "surplus_kg": display(marketable - fulfilled, 3)}
+        resources, storage = resource_week(inputs, day, index, cohort_gross, delivered, storage)
+        if resources:
+            for name, row in resources.items():
+                resource_states.append(row["capacity_met"])
+                if row["capacity_met"] is False:
+                    if name == "water":
+                        water_deficit_weeks += 1
+                    else:
+                        labour_deficit_weeks += 1
         if demand > 0 and delivered == demand:
             service_weeks += 1
         # Collections on calendar month start dates; a mid-month start does not
@@ -89,6 +107,7 @@ def _calculate(snapshot):
             "collections_inr": collections, "opex_inr": opex, "capex_inr": capex,
             "operating_surplus_inr": operating_profit, "economic_surplus_inr": economic_profit}
         weeks.append({"week": index + 1, "start_date": day.isoformat(), "groups": groups,
+            "resources": resource_display(resources) if resources else None,
             **{key: display(value, 3 if key.endswith("_kg") else 2) for key, value in raw.items()},
             "opening_cash_inr": display(opening), "closing_cash_inr": display(cash)})
         # Monthly display groups weekly buckets by their start date, not exact
@@ -97,12 +116,26 @@ def _calculate(snapshot):
             totals[key] += value
             month_rows[day.strftime("%Y-%m")][key] += value
     warnings = [
-        "Illustrative, not validated: seasonal crop suitability, solar/PAR/DLI, water, nutrients and labour capacity are not modeled yet.",
+        "Illustrative, not validated: seasonal crop suitability, nutrients, root competition and calibrated crop stress are not assessed.",
         "Yields are input assumptions with uniform daily harvest profiles; no vertical yield uplift is applied.",
         "No storage, substitution, procurement, churn, tax, debt, depreciation or surplus sales are modeled.",
         "Revenue assumes subscribed households; collections use paid enrollment and calendar-month payments, independently of supply. Refunds and service-dependent billing are not modeled.",
         "Monthly summaries group seven-day buckets by start date; they are not calendar-accurate ledgers.",
     ]
+    linked = sum(bool(p.get("light_response")) for p in inputs["plantings"])
+    if linked:
+        warnings.append("Linked DLI constrains unshaded potential using an assumed linear response averaged across the growing period. Curves are not field-calibrated.")
+    if linked < len(inputs["plantings"]):
+        warnings.append("Some cohorts have no linked light study; their yields remain unconstrained user assumptions.")
+    if not settings:
+        warnings.append("Water and labour capacity are not assessed: enable resource budgets and crop-specific requirements.")
+    else:
+        warnings.append("Water uses assumed constant crop demand and weekly storage/pumping budgets, not weather/ET or daily peak checks. Labour uses explicit task-rate assumptions.")
+        warnings.append("Resource shortfalls do not automatically reduce yield or hire workers; missing crop stress/hiring rules remain explicit constraints.")
+        if None in resource_states:
+            warnings.append("Some active cohorts have unknown water or labour requirements. Their capacity checks remain incomplete.")
+        if water_deficit_weeks or labour_deficit_weeks:
+            warnings.append("Water or labour capacity is exceeded; projected basket fulfillment alone does not establish feasibility.")
     if not inputs["plantings"]:
         warnings.append("No planting cohorts supplied: forecast harvest is zero, not an estimate of farm capacity.")
     if D(inputs["monthly_fixed_opex_inr"]) == 0:
@@ -114,10 +147,11 @@ def _calculate(snapshot):
     fingerprint = hashlib.sha256(json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     return {
         "engine_version": ENGINE_VERSION, "input_sha256": fingerprint, "status": "provisional",
-        "horizon_weeks": 104, "currency": "INR", "units": {"mass": "kg", "area": "m2", "cash": "INR"},
+        "horizon_weeks": 104, "currency": "INR", "units": {"mass": "kg", "area": "m2", "cash": "INR", "water": "m3", "labour": "person-hours"},
         "assumptions": {"loss_policy": "One combined loss applied once to gross harvest", "harvest_profile": "uniform_daily",
             "collection_policy": "Full monthly payment on the first day of each calendar month", "storage_policy": "none; weekly surplus is not carried forward",
             "solar_validated": False, "confidence": "user assumptions unless documented per planting"},
+        "light_adjustments": {id: display(factor, 6) for id, factor in factors.items()},
         "baseline": {"annual_delivered_demand_kg": display(demand * 52, 3),
             "annual_gross_target_kg": display(demand * 52 / (1 - loss), 3),
             "annual_subscription_revenue_inr": display(annual_revenue),
@@ -130,6 +164,9 @@ def _calculate(snapshot):
             "service_target_met": D(service_weeks) / 104 >= D(inputs["service_target_fraction"]) if demand else None,
             "closing_cash_inr": display(cash), "minimum_cash_inr": display(minimum_cash),
             "additional_funding_required_inr": display(max(ZERO, -minimum_cash)),
+            "water_deficit_weeks": water_deficit_weeks if settings.get("water") else None,
+            "labour_deficit_weeks": labour_deficit_weeks if settings.get("labour") else None,
+            "resource_constraints_met": False if False in resource_states else None if not resource_states or None in resource_states else True,
             "agronomic_feasibility": "not_assessed"},
         "crop_gross_totals_kg": {crop: display(amount, 3) for crop, amount in sorted(crop_totals.items())},
         "weeks": weeks,

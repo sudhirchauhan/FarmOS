@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from .engine import ENGINE_VERSION, calculate
 from .models import Farm, Scenario, ScenarioRun
 from .serializers import FarmSerializer, ScenarioSerializer, RunSerializer, json_values
+from .light_links import resolve_light_studies
 
 
 class FarmViewSet(mixins.CreateModelMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
@@ -59,6 +60,7 @@ class RunViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gene
             check = ScenarioSerializer(scenario, data={"farm": str(scenario.farm_id), "name": scenario.name, "inputs": scenario.inputs})
             check.is_valid(raise_exception=True)
             snapshot = {"farm": dict(farm), "inputs": json_values(check.validated_data["inputs"])}
+            snapshot["light_studies"] = resolve_light_studies(check.validated_data["inputs"])
             run = ScenarioRun.objects.create(scenario=scenario, scenario_revision=scenario.revision,
                 engine_version=ENGINE_VERSION, assumptions_snapshot=snapshot, result=calculate(snapshot))
         return Response(self.get_serializer(run).data, status=status.HTTP_201_CREATED)
@@ -95,6 +97,31 @@ class RunViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gene
             "summary": runs[id].result["summary"],
             "delta_from_reference": {key: str(Decimal(runs[id].result["summary"][key]) - Decimal(reference.result["summary"][key])) for key in metrics},
         } for id in ids]})
+
+
+    @action(detail=True, methods=["get"], url_path="resource-export")
+    def resource_export(self, request, pk=None):
+        run = self.get_object()
+        stream = io.StringIO()
+        water_fields = ("opening_storage_m3", "inflow_m3", "overflow_m3", "evaporation_m3", "withdrawal_m3",
+                        "closing_storage_m3", "shortfall_m3")
+        labour_fields = ("required_hours", "available_hours", "shortfall_hours")
+        fields = ["week", "start_date", *["water_" + name for name in water_fields],
+                  *["labour_" + name for name in labour_fields], "water_check", "labour_check"]
+        writer = csv.DictWriter(stream, fieldnames=fields)
+        writer.writeheader()
+        for week in run.result["weeks"]:
+            resources = week.get("resources") or {}
+            water, labour = resources.get("water", {}), resources.get("labour", {})
+            check = lambda row: "not_assessed" if not row else "unknown" if row["capacity_met"] is None else "met" if row["capacity_met"] else "exceeded"
+            writer.writerow({"week": week["week"], "start_date": week["start_date"],
+                **{"water_" + key: water.get(key, "") for key in water_fields},
+                **{"labour_" + key: labour.get(key, "") for key in labour_fields},
+                "water_check": check(water), "labour_check": check(labour)})
+        response = HttpResponse(stream.getvalue(), content_type="text/csv")
+        response["Content-Disposition"] = f'attachment; filename="farmos-{run.id}-resources.csv"'
+        response["X-FarmOS-Engine-Version"] = run.engine_version
+        return response
 
 
 def health(request):

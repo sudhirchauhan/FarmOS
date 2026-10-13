@@ -80,3 +80,19 @@ node scripts/render-sunlight.mjs
 ```
 
 This calculation creates a retained solar study in the local development database.
+
+## Linked light and resource constraints
+
+[Calculated resource constraints JPG](17-linked-light-resource-constraints.jpg)
+shows engine 0.2 weekly water and labour results for an illustrative crop linked
+to seven days of computed DLI. Capacity deficits are reported independently of
+projected delivery; no extra stress multiplier or hiring is invented.
+The fixture is not validated agronomy. Regenerate with both servers running:
+
+```bash
+cd frontend
+node scripts/render-resources.mjs
+```
+
+The script retains its explicitly illustrative farm, solar study and scenario in
+the local development database.

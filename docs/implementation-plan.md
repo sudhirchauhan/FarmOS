@@ -49,8 +49,12 @@ PostgreSQL is configurable but PostGIS models/integration are reserved for slice
 The initial solar slice now provides standalone position-level light studies with
 pvlib SPA, explicit clear-sky/supplied radiation, opaque-box ray shading, diffuse sky
 visibility and PAR/DLI integration. Its interface is available at `/sunlight`.
-Canopy transmission/growth, crop response, spatial persistence and resource coupling
-remain outstanding; it does not change planting yield assumptions.
+Engine 0.2 links complete growing-period DLI to explicit, provisional crop-light
+curves and reduces unshaded potential without any uplift. Water storage/pumping
+and task-based labour constraints have weekly reporting and CSV exports. Missing
+requirements remain unknown; deficits are not silently converted to another crop
+penalty or extra hiring. Canopy transmission/growth, calibrated response curves,
+nutrient/biomass balance, spatial persistence and combined-stress validation remain.
 There is no validated agronomic feasibility result, vertical forecast, optimizer,
 10-year ledger or investment recommendation yet. Cost defaults are explicitly zero
 where input is missing and produce warnings. Revenue assumes subscribed households;

@@ -32,8 +32,8 @@ test('create a weekly plan, reload saved assumptions and compare an alternative'
   await page.getByRole('button', { name: 'Save and calculate 104 weeks' }).click();
   await expect(results).toContainText('₹36,00,000');
   await expect(results.getByRole('heading', { level: 2 })).toContainText('1 acre');
-  await page.getByRole('checkbox').nth(0).check();
-  await page.getByRole('checkbox').nth(1).check();
+  await page.locator('.history').getByRole('checkbox').nth(0).check();
+  await page.locator('.history').getByRole('checkbox').nth(1).check();
   await page.getByRole('button', { name: 'Compare selected (2/4)' }).click();
   await expect(page.getByRole('columnheader', { name: 'Δ delivered kg' })).toBeVisible();
   await expect(page.locator('.error[role="alert"]')).toHaveCount(0);

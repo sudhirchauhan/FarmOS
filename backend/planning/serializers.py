@@ -4,22 +4,10 @@ from rest_framework import serializers
 from .models import Farm, Scenario, ScenarioRun
 
 
-class StrictSerializer(serializers.Serializer):
-    def to_internal_value(self, data):
-        if isinstance(data, dict):
-            unknown = set(data) - set(self.fields)
-            if unknown:
-                raise serializers.ValidationError({key: "Unknown field." for key in unknown})
-        return super().to_internal_value(data)
-
-
-def number(default=None, *, maximum=None, minimum=0, digits=16, places=4):
-    kwargs = dict(max_digits=digits, decimal_places=places, min_value=Decimal(str(minimum)))
-    if default is not None:
-        kwargs["default"] = Decimal(str(default))
-    if maximum is not None:
-        kwargs["max_value"] = Decimal(str(maximum))
-    return serializers.DecimalField(**kwargs)
+from .fields import StrictSerializer, number
+from .resource_serializers import LightResponse, ResourceInputs
+from .light_links import resolve_light_studies
+from uuid import UUID
 
 
 GROUPS = ("leafy", "fruiting", "roots", "legumes")
@@ -54,6 +42,12 @@ class PlantingInput(StrictSerializer):
     gross_yield_kg_per_m2 = number()
     evidence = serializers.ChoiceField(choices=("user_assumption", "expert_estimate", "published", "measured", "testimonial"), default="user_assumption")
     source_note = serializers.CharField(max_length=1000, allow_blank=True, default="")
+    light_response = LightResponse(required=False, allow_null=True, default=None)
+    daily_water_l_per_m2 = serializers.DecimalField(max_digits=16, decimal_places=4, min_value=0, required=False, allow_null=True, default=None)
+    sowing_hours_per_m2 = serializers.DecimalField(max_digits=16, decimal_places=4, min_value=0, required=False, allow_null=True, default=None)
+    maintenance_hours_per_m2_week = serializers.DecimalField(max_digits=16, decimal_places=4, min_value=0, required=False, allow_null=True, default=None)
+    harvest_hours_per_kg = serializers.DecimalField(max_digits=16, decimal_places=4, min_value=0, required=False, allow_null=True, default=None)
+
 
     def validate(self, attrs):
         if attrs["harvest_start"] < attrs["sowing_date"]:
@@ -82,6 +76,7 @@ class PlanningInputs(StrictSerializer):
     family_labour_hourly_value_inr = number(0, places=2)
     service_target_fraction = number("0.95", maximum=1)
     basket_shares = BasketShares(default=lambda: {group: "0.25" for group in GROUPS})
+    resources = ResourceInputs(required=False, allow_null=True, default=None)
     beds = BedInput(many=True, default=list, max_length=1000)
     plantings = PlantingInput(many=True, default=list, max_length=1000)
 
@@ -138,6 +133,8 @@ class ScenarioSerializer(serializers.ModelSerializer):
             footprint = sum(Decimal(str(bed["area_m2"])) for bed in inputs["beds"])
             if footprint > farm.area_acres * Decimal("4046.8564224"):
                 raise serializers.ValidationError({"inputs": "Exclusive bed footprints exceed the farm's physical land area."})
+        if inputs:
+            resolve_light_studies(inputs)
         return attrs
 
     def create(self, validated_data):
@@ -157,7 +154,7 @@ def json_values(value):
         return {key: json_values(item) for key, item in value.items()}
     if isinstance(value, list):
         return [json_values(item) for item in value]
-    if isinstance(value, Decimal):
+    if isinstance(value, (Decimal, UUID)):
         return str(value)
     if hasattr(value, "isoformat"):
         return value.isoformat()

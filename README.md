@@ -16,9 +16,13 @@ See the [vertical-slice plan](docs/implementation-plan.md) and [JPG/GIF mockups]
   shadows, isotropic diffuse-sky visibility, oriented PAR and daily DLI. Supports
   supplied midpoint DNI/DHI or explicitly assumed clear-sky radiation, 15/30/60
   minute intervals, local calendar days and bounded annual runs.
+- Optional crop-light coupling with complete growing-period study coverage,
+  explicit linear DLI response curves and immutable provenance snapshots.
+- Weekly water conservation, labour-capacity budgets, unknown-input flags and
+  resource shortfall reports with CSV export.
 
-All results are provisional. Solar/PAR/DLI is available as a separate light study;
-crop-light response, canopy growth, validated crop parameters, resource feasibility,
+All results are provisional. Solar/PAR/DLI can constrain unshaded crop potential
+through user-assumed curves. Canopy growth, calibrated crop parameters, nutrient/biomass feasibility,
 10-year financials, optimization and operations are subsequent slices.
 Subscription revenue and collections are independent of fulfilled supply; refund
 and service-dependent billing rules are not yet modeled. Zero costs generate a warning.
@@ -99,6 +103,7 @@ precision, so displayed weekly totals may differ slightly from rounded aggregate
 - `POST /api/scenarios/{id}/clone/`
 - `POST /api/scenario-runs/` with `{"scenario": "uuid"}`; `GET` list/detail
 - `GET /api/scenario-runs/{id}/weekly-export/`
+- `GET /api/scenario-runs/{id}/resource-export/`
 - `GET /api/scenario-runs/comparison/?run={uuid}&run={uuid}` (2–4 distinct runs)
 - `GET /api/health/`
 - `POST /api/solar-runs/`, `GET /api/solar-runs/{id}/` — immutable standalone light studies.
@@ -135,3 +140,38 @@ DST day lengths and deterministic results. This is initial verification, not com
 field calibration or all PRD §18 acceptance gates. A 365-day hourly one-position run
 produced 8,760 samples in about 0.36 seconds on the current machine; larger workloads
 have not been benchmarked.
+
+## Light coupling and resource budgets (engine 0.2)
+
+Each planting can include `light_response` with `solar_runs` (1–4 IDs), `point_id`,
+`minimum_dli`, `optimum_dli` and `source_note`. Response is zero at/below minimum,
+linear to optimum and capped at one. Mean daily response over sowing through harvest
+end constrains gross cycle yield, which must represent unshaded potential. It is
+an empirical assumption, not a calibrated growth model. Combined loss is applied
+once afterward. Every growing day needs a study value. Missing dates/positions,
+conflicting dates and mixed-site studies are rejected; one day is not reused for
+other seasons. Runs snapshot DLI, study inputs, sources, versions and fingerprints.
+At most 64 distinct studies are supported per synchronous run.
+
+Enable `resources.water` with `storage_capacity_m3`, `opening_storage_m3`,
+`weekly_inflow_m3`, `weekly_evaporation_m3`, `weekly_pumping_limit_m3`,
+`irrigation_efficiency` and optional `weekly_overrides` of `{week, inflow_m3?, evaporation_m3?}`.
+Each crop's `daily_water_l_per_m2` drives demand during occupation. Weekly chronology:
+opening storage + inflow → overflow at capacity → evaporation → pumping-limited
+withdrawal → closing storage. Withdrawal × efficiency is delivered crop water;
+conveyance loss is separate. Evaporation cannot exceed available water. This is a
+weekly assumed-demand model, not weather-driven ET or daily peak assessment.
+
+Enable `resources.labour` with `available_hours_per_week`, optional
+`fixed_hours_per_week`, `packing_hours_per_delivered_kg` and `delivery_hours_per_week`.
+Crop parameters are `sowing_hours_per_m2`, `maintenance_hours_per_m2_week` and
+`harvest_hours_per_kg`. Sowing is dated, maintenance is prorated to occupation days,
+harvesting uses gross mass and packing uses delivered mass. Delivery hours apply
+to supplied weeks. Owner-labour valuation remains a separate financial assumption;
+extra hiring or wages are not silently introduced.
+
+Blank crop resource requirements stay unknown rather than zero. Capacity results
+are `true`, `false` or `null` (incomplete/not assessed). Water/labour deficits are
+constraints and do not invent another yield penalty without a response rule.
+Nutrients, root competition, calibrated curves and combined-stress validation remain
+outstanding before agronomic feasibility claims.

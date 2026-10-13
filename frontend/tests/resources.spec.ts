@@ -1,0 +1,48 @@
+import { expect, test } from '@playwright/test';
+
+test('link a computed week of DLI and report resource deficits without inventing yield penalties', async ({ page, request }) => {
+  const solar = await request.post('/api/solar-runs/', { data: { latitude: 18.52, longitude: 73.86,
+    timezone: 'Asia/Kolkata', start_date: '2026-01-01', days: 7, points: [{ id: 'open', x: 0, y: 0, z: 0 }] } });
+  expect(solar.status()).toBe(201);
+  const study = await solar.json();
+  await page.goto('/');
+  await page.getByLabel('Farm name', { exact: true }).fill(`Browser test resource ${Date.now()}`);
+  await page.getByLabel('First planning day').fill('2026-01-01');
+  await page.getByRole('button', { name: '+ Add cohort' }).click();
+  await page.getByLabel('Crop / variety').fill('Amaranth');
+  await page.getByLabel('Harvest duration').fill('1');
+  await page.getByLabel('Gross cycle yield').fill('5');
+  await page.getByText('Crop light response and resource requirements', { exact: true }).click();
+  await page.getByLabel('Link a DLI response', { exact: true }).check();
+  await page.getByLabel('Solar run IDs').fill(study.id);
+  await page.getByLabel('Growing position ID').fill('open');
+  await page.getByLabel('Minimum DLI').fill('0');
+  await page.getByLabel('Optimum DLI').fill('100');
+  await page.getByLabel('Light curve assumption / source').fill('Browser test: deliberately provisional linear response');
+  await page.getByLabel('Crop water').fill('2');
+  await page.getByLabel('Sowing hours / m²', { exact: true }).fill('0.1');
+  await page.getByLabel('Maintenance hours').fill('0.05');
+  await page.getByLabel('Harvest hours').fill('0.1');
+  await page.getByLabel('Enable water budget', { exact: true }).check();
+  await page.getByLabel('Opening storage').fill('0');
+  await page.getByLabel('Permitted inflow').fill('0');
+  await page.getByLabel('Enable labour budget', { exact: true }).check();
+  await page.getByLabel('Available person-hours').fill('0');
+  const created = page.waitForResponse(r => r.url().includes('/api/scenario-runs/') && r.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Save and calculate 104 weeks' }).click();
+  const response = await created;
+  expect(response.status()).toBe(201);
+  const data = await response.json();
+  const factor = Number(Object.values(data.result.light_adjustments)[0]);
+  expect(factor).toBeGreaterThan(0); expect(factor).toBeLessThan(1);
+  expect(data.result.summary.water_deficit_weeks).toBe(1);
+  expect(data.result.summary.resource_constraints_met).toBe(false);
+  await expect(page.locator('#results')).toContainText('Capacity checks: Exceeded');
+  await expect(page.getByRole('link', { name: 'Download resource CSV' })).toBeVisible();
+  await expect(page.locator('.error[role="alert"]')).toHaveCount(0);
+  await page.reload();
+  await page.getByRole('button', { name: 'Use as draft' }).first().click();
+  await expect(page.getByLabel('Enable water budget', { exact: true })).toBeChecked();
+  await page.getByText('Crop light response and resource requirements', { exact: true }).click();
+  await expect(page.getByLabel('Solar run IDs')).toHaveValue(study.id);
+});
