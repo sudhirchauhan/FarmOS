@@ -47,11 +47,16 @@ class PlantingInput(StrictSerializer):
     sowing_hours_per_m2 = serializers.DecimalField(max_digits=16, decimal_places=4, min_value=0, required=False, allow_null=True, default=None)
     maintenance_hours_per_m2_week = serializers.DecimalField(max_digits=16, decimal_places=4, min_value=0, required=False, allow_null=True, default=None)
     harvest_hours_per_kg = serializers.DecimalField(max_digits=16, decimal_places=4, min_value=0, required=False, allow_null=True, default=None)
+    n_removal_g_per_gross_kg = serializers.DecimalField(max_digits=12, decimal_places=4, min_value=0, max_value=1000, required=False, allow_null=True, default=None)
+    p_removal_g_per_gross_kg = serializers.DecimalField(max_digits=12, decimal_places=4, min_value=0, max_value=1000, required=False, allow_null=True, default=None)
+    k_removal_g_per_gross_kg = serializers.DecimalField(max_digits=12, decimal_places=4, min_value=0, max_value=1000, required=False, allow_null=True, default=None)
 
 
     def validate(self, attrs):
         if attrs["harvest_start"] < attrs["sowing_date"]:
             raise serializers.ValidationError("Harvest cannot start before sowing.")
+        if sum((attrs.get(f"{element}_removal_g_per_gross_kg") or Decimal(0)) for element in ("n", "p", "k")) > 1000:
+            raise serializers.ValidationError("Known elemental nutrient removal cannot exceed gross harvest mass.")
         try:
             attrs["harvest_start"] + timedelta(weeks=attrs["harvest_weeks"])
         except OverflowError:

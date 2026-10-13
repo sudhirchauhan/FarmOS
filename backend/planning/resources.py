@@ -100,4 +100,6 @@ def resource_display(value):
         return str(value.quantize(Decimal("0.0001")))
     if isinstance(value, dict):
         return {key: resource_display(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [resource_display(item) for item in value]
     return value

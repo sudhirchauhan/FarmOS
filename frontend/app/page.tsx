@@ -10,21 +10,27 @@ type Planting = { id: string; bed_id: string; crop: string; crop_group: Group; a
   sowing_date: string; harvest_start: string; harvest_weeks: number; gross_yield_kg_per_m2: string;
   evidence: string; source_note: string; light_response?: LightResponse | null;
   daily_water_l_per_m2?: string | null; sowing_hours_per_m2?: string | null;
-  maintenance_hours_per_m2_week?: string | null; harvest_hours_per_kg?: string | null };
+  maintenance_hours_per_m2_week?: string | null; harvest_hours_per_kg?: string | null;
+  n_removal_g_per_gross_kg?: string | null; p_removal_g_per_gross_kg?: string | null; k_removal_g_per_gross_kg?: string | null };
 type Inputs = { start_date: string; households: number; basket_kg_per_week: string; monthly_price_inr: string;
   combined_loss_fraction: string; paid_enrollment_fraction: string; initial_cash_inr: string; initial_capex_inr: string;
   monthly_fixed_opex_inr: string; variable_cost_inr_per_delivered_kg: string; weekly_family_labour_hours: string;
   family_labour_hourly_value_inr: string; service_target_fraction: string; basket_shares: Record<Group, string>;
   beds: { id: string; area_m2: string }[]; plantings: Planting[]; resources?: ResourceBudget | null };
+type ElementBalance = { opening_available_kg: string; available_input_kg: string; total_compost_content_kg: string;
+  required_removal_kg: string; tracked_pool_used_kg: string; closing_available_kg: string; shortfall_kg: string;
+  unknown_plantings: string[]; unknown_sources: string[]; capacity_met: boolean | null };
 type Resources = { water?: { opening_storage_m3: string; inflow_m3: string; closing_storage_m3: string; shortfall_m3: string; unknown_plantings: string[] };
-  labour?: { required_hours: string; available_hours: string; shortfall_hours: string; unknown_plantings: string[] } };
+  labour?: { required_hours: string; available_hours: string; shortfall_hours: string; unknown_plantings: string[] };
+  nutrients?: { elements: Record<'n' | 'p' | 'k', ElementBalance>; capacity_met: boolean | null } };
 type Farm = { id: string; name: string; region: string; area_acres: string; water_reliability: string; growing_approach: string };
 type Week = { week: number; start_date: string; demand_kg: string; gross_kg: string; delivered_kg: string;
   shortfall_kg: string; closing_cash_inr: string; collections_inr: string; groups: Record<Group, Record<string, string>>; resources?: Resources | null };
 type Run = { id: string; scenario: string; scenario_revision: number; created_at: string; engine_version: string;
   assumptions_snapshot: { farm: Farm; inputs: Inputs };
   result: { baseline: Record<string, string>; summary: Record<string, string | number | boolean | null>;
-    weeks: Week[]; warnings: string[]; input_sha256: string; light_adjustments?: Record<string, string> } };
+    weeks: Week[]; warnings: string[]; input_sha256: string; light_adjustments?: Record<string, string>;
+    biomass?: { id: string; name: string; dry_mass_kg: string; allocated_dry_kg: Record<string, string>; unallocated_dry_kg: string }[] | null } };
 type Compared = { runs: { id: string; baseline: Record<string, string>; summary: Record<string, string | number | boolean | null>;
   delta_from_reference: Record<string, string> }[] };
 
@@ -174,6 +180,8 @@ export default function Planner() {
               {(['point_id', 'minimum_dli', 'optimum_dli', 'source_note'] as const).map(key => <label key={key}>{({ point_id: 'Growing position ID', minimum_dli: 'Minimum DLI · mol/m²/day', optimum_dli: 'Optimum DLI · mol/m²/day', source_note: 'Light curve assumption / source' })[key]}<input required type={key.includes('dli') ? 'number' : 'text'} min="0" step="0.0001" value={p.light_response![key]} onChange={e => setLight(index, { ...p.light_response!, [key]: e.target.value })} /></label>)}
             </div>}
             <div className="fields">{([['daily_water_l_per_m2', 'Crop water · litres / m² / day'], ['sowing_hours_per_m2', 'Sowing hours / m²'], ['maintenance_hours_per_m2_week', 'Maintenance hours / m² / week'], ['harvest_hours_per_kg', 'Harvest hours / gross kg']] as const).map(([key, label]) => <label key={key}>{label}<input type="number" min="0" step="0.0001" placeholder="Unknown" value={p[key] ?? ''} onChange={e => setInputs({ ...inputs, plantings: inputs.plantings.map((row, i) => i === index ? { ...row, [key]: e.target.value || null } : row) })} /></label>)}</div>
+            <p className="muted">Harvest removal uses elemental N/P/K per gross kg, including grading and postharvest losses. Blank coefficients remain unknown.</p>
+            <div className="fields">{(['n', 'p', 'k'] as const).map(element => { const key = `${element}_removal_g_per_gross_kg` as const; return <label key={element}>{element.toUpperCase()} removal · g / gross kg<input type="number" min="0" max="1000" step="0.0001" placeholder="Unknown" value={p[key] ?? ''} onChange={e => setInputs({ ...inputs, plantings: inputs.plantings.map((row, i) => i === index ? { ...row, [key]: e.target.value || null } : row) })} /></label>; })}</div>
           </details>
         </div>)}
         <div className="actions"><button type="button" className="secondary" onClick={addPlanting}>+ Add cohort</button></div>
@@ -192,10 +200,14 @@ export default function Planner() {
           <div className="metric"><span>Subscription revenue benchmark</span><strong>{money(run.result.baseline.annual_subscription_revenue_inr)}</strong><span>Annual · not guaranteed receipts</span></div>
           <div className="metric"><span>Fully supplied weeks</span><strong>{run.result.summary.fully_supplied_weeks} / 104</strong><span>Agronomic feasibility not assessed</span></div>
         </div>
-        {run.assumptions_snapshot.inputs.resources && <details open><summary>Weekly water and labour constraints</summary><a href={`/api/scenario-runs/${run.id}/resource-export/`}>Download resource CSV</a><p className="muted">Water deficit weeks: {run.result.summary.water_deficit_weeks ?? 'Not assessed'} · Labour deficit weeks: {run.result.summary.labour_deficit_weeks ?? 'Not assessed'} · Capacity checks: {run.result.summary.resource_constraints_met === null ? 'Incomplete' : run.result.summary.resource_constraints_met ? 'Within stated budgets' : 'Exceeded'}</p>
+        {(run.assumptions_snapshot.inputs.resources?.water || run.assumptions_snapshot.inputs.resources?.labour) && <details open><summary>Weekly water and labour constraints</summary><a href={`/api/scenario-runs/${run.id}/resource-export/`}>Download resource CSV</a><p className="muted">Water deficit weeks: {run.result.summary.water_deficit_weeks ?? 'Not assessed'} · Labour deficit weeks: {run.result.summary.labour_deficit_weeks ?? 'Not assessed'} · Capacity checks: {run.result.summary.resource_constraints_met === null ? 'Incomplete' : run.result.summary.resource_constraints_met ? 'Within stated budgets' : 'Exceeded'}</p>
           <div className="scroll"><table><thead><tr><th>Week</th><th>Opening m³</th><th>Inflow m³</th><th>Closing m³</th><th>Water shortfall m³</th><th>Required hours</th><th>Labour shortfall h</th><th>Unknown crop requirements</th></tr></thead><tbody>{run.result.weeks.map(week => <tr key={week.week}><td>{week.start_date}</td><td>{week.resources?.water?.opening_storage_m3 ?? '—'}</td><td>{week.resources?.water?.inflow_m3 ?? '—'}</td><td>{week.resources?.water?.closing_storage_m3 ?? '—'}</td><td>{week.resources?.water?.shortfall_m3 ?? '—'}</td><td>{week.resources?.labour?.required_hours ?? '—'}</td><td>{week.resources?.labour?.shortfall_hours ?? '—'}</td><td>{[...(week.resources?.water?.unknown_plantings || []), ...(week.resources?.labour?.unknown_plantings || [])].length ? 'Yes' : 'No'}</td></tr>)}</tbody></table></div>
         </details>}
         {run.result.light_adjustments && <details><summary>Applied light response factors</summary><pre>{JSON.stringify(run.result.light_adjustments, null, 2)}</pre><small>Factors above 1 are never applied. Curves are user assumptions.</small></details>}
+        {run.assumptions_snapshot.inputs.resources?.nutrients && <details open id="nutrient-report"><summary>Weekly elemental nutrient ledger</summary><a href={`/api/scenario-runs/${run.id}/nutrient-export/`}>Download nutrient CSV</a><p className="muted">Nutrient deficit weeks: {run.result.summary.nutrient_deficit_weeks} · kg of elemental N/P/K. Shortfalls concern the tracked available pool, not a validated soil diagnosis. Unknown composition means reported inputs are known lower bounds and the check remains incomplete.</p>
+          <div className="scroll"><table><thead><tr><th>Week</th><th>Element</th><th>Opening kg</th><th>Total input content kg</th><th>Available input kg</th><th>Required removal kg</th><th>Used pool kg</th><th>Closing kg</th><th>Shortfall kg</th><th>Check</th></tr></thead><tbody>{run.result.weeks.flatMap(week => (['n', 'p', 'k'] as const).map(element => { const row = week.resources?.nutrients?.elements[element]; return row ? <tr key={`${week.week}-${element}`}><td>{week.start_date}</td><td>{element.toUpperCase()}</td><td>{row.opening_available_kg}</td><td>{row.total_compost_content_kg}</td><td>{row.available_input_kg}</td><td>{row.required_removal_kg}</td><td>{row.tracked_pool_used_kg}</td><td>{row.closing_available_kg}</td><td>{row.shortfall_kg}</td><td>{row.capacity_met === null ? 'Unknown inputs' : row.capacity_met ? 'Within budget' : 'Deficit'}</td></tr> : null; }))}</tbody></table></div>
+          <h3 style={{ marginTop: 20 }}>Exclusive dry-biomass allocation</h3><div className="scroll"><table><thead><tr><th>Batch</th><th>Dry kg</th><th>Compost</th><th>Mulch</th><th>Feed</th><th>Fuel</th><th>Reserve</th><th>Unallocated kg</th></tr></thead><tbody>{run.result.biomass?.map(lot => <tr key={lot.id}><td>{lot.name}</td><td>{lot.dry_mass_kg}</td>{['compost', 'mulch', 'feed', 'fuel', 'reserve'].map(purpose => <td key={purpose}>{lot.allocated_dry_kg[purpose]}</td>)}<td>{lot.unallocated_dry_kg}</td></tr>)}</tbody></table></div>
+        </details>}
         <div className="metrics">
           <div className="metric"><span>Delivered in 104 weeks</span><strong>{quantity(run.result.summary.delivered_kg)} kg</strong></div>
           <div className="metric"><span>Unfilled demand</span><strong>{quantity(run.result.summary.shortfall_kg)} kg</strong></div>

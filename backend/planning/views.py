@@ -124,6 +124,29 @@ class RunViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gene
         return response
 
 
+    @action(detail=True, methods=["get"], url_path="nutrient-export")
+    def nutrient_export(self, request, pk=None):
+        run = self.get_object()
+        if not (run.assumptions_snapshot["inputs"].get("resources") or {}).get("nutrients"):
+            raise serializers.ValidationError("This run has no nutrient budget; it cannot be exported as assessed.")
+        stream = io.StringIO()
+        measures = ("opening_available_kg", "total_compost_content_kg", "available_input_kg", "required_removal_kg",
+                    "tracked_pool_used_kg", "closing_available_kg", "shortfall_kg")
+        writer = csv.DictWriter(stream, fieldnames=["week", "start_date", "element", *measures,
+                                                  "unknown_crop_count", "unknown_source_count", "check"])
+        writer.writeheader()
+        for week in run.result["weeks"]:
+            for element, row in week["resources"]["nutrients"]["elements"].items():
+                writer.writerow({"week": week["week"], "start_date": week["start_date"], "element": element.upper(),
+                    **{key: row[key] for key in measures}, "unknown_crop_count": len(row["unknown_plantings"]),
+                    "unknown_source_count": len(row["unknown_sources"]),
+                    "check": "unknown" if row["capacity_met"] is None else "met" if row["capacity_met"] else "deficit"})
+        response = HttpResponse(stream.getvalue(), content_type="text/csv")
+        response["Content-Disposition"] = f'attachment; filename="farmos-{run.id}-nutrients.csv"'
+        response["X-FarmOS-Engine-Version"] = run.engine_version
+        return response
+
+
 def health(request):
     from django.http import JsonResponse
     return JsonResponse({"status": "ok", "engine_version": ENGINE_VERSION})

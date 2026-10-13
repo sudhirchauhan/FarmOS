@@ -54,7 +54,11 @@ curves and reduces unshaded potential without any uplift. Water storage/pumping
 and task-based labour constraints have weekly reporting and CSV exports. Missing
 requirements remain unknown; deficits are not silently converted to another crop
 penalty or extra hiring. Canopy transmission/growth, calibrated response curves,
-nutrient/biomass balance, spatial persistence and combined-stress validation remain.
+spatial persistence and combined-stress validation remain. Engine 0.3 adds an
+available elemental N/P/K harvest-removal ledger and exclusive dry-biomass allocation
+with UI and CSV exports. Availability is an explicit allocation-week assumption;
+mineralization, maturation and crop-uptake timing are not modeled. See TASKS.md for
+the acceptance-based backlog and completed slices.
 There is no validated agronomic feasibility result, vertical forecast, optimizer,
 10-year ledger or investment recommendation yet. Cost defaults are explicitly zero
 where input is missing and produce warnings. Revenue assumes subscribed households;

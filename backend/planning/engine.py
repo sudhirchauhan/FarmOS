@@ -5,8 +5,9 @@ from decimal import Decimal, ROUND_HALF_UP, localcontext
 import hashlib
 import json
 from .resources import light_factors, resource_week, resource_display
+from .nutrients import initial_nutrients, nutrient_week, biomass_summary
 
-ENGINE_VERSION = "planning-core/0.2.0"
+ENGINE_VERSION = "planning-core/0.3.0"
 ACRE_M2 = Decimal("4046.8564224")
 GROUPS = ("leafy", "fruiting", "roots", "legumes")
 ZERO = Decimal(0)
@@ -50,6 +51,8 @@ def _calculate(snapshot):
     settings = inputs.get("resources") or {}
     storage = D(settings["water"]["opening_storage_m3"]) if settings.get("water") else ZERO
     water_deficit_weeks = labour_deficit_weeks = 0
+    nutrient_deficit_weeks = 0
+    nutrient_state = initial_nutrients(inputs)
     resource_states = []
     for index in range(104):
         day = start + timedelta(weeks=index)
@@ -76,14 +79,19 @@ def _calculate(snapshot):
                 "marketable_kg": display(marketable, 3), "delivered_kg": display(fulfilled, 3),
                 "shortfall_kg": display(requested - fulfilled, 3), "surplus_kg": display(marketable - fulfilled, 3)}
         resources, storage = resource_week(inputs, day, index, cohort_gross, delivered, storage)
+        nutrients = nutrient_week(inputs, index, cohort_gross, nutrient_state)
+        if nutrients:
+            resources = {**(resources or {}), "nutrients": nutrients}
         if resources:
             for name, row in resources.items():
                 resource_states.append(row["capacity_met"])
                 if row["capacity_met"] is False:
                     if name == "water":
                         water_deficit_weeks += 1
-                    else:
+                    elif name == "labour":
                         labour_deficit_weeks += 1
+                    else:
+                        nutrient_deficit_weeks += 1
         if demand > 0 and delivered == demand:
             service_weeks += 1
         # Collections on calendar month start dates; a mid-month start does not
@@ -116,7 +124,7 @@ def _calculate(snapshot):
             totals[key] += value
             month_rows[day.strftime("%Y-%m")][key] += value
     warnings = [
-        "Illustrative, not validated: seasonal crop suitability, nutrients, root competition and calibrated crop stress are not assessed.",
+        "Illustrative, not validated: seasonal crop suitability, root competition, mineralization and calibrated crop stress are not assessed.",
         "Yields are input assumptions with uniform daily harvest profiles; no vertical yield uplift is applied.",
         "No storage, substitution, procurement, churn, tax, debt, depreciation or surplus sales are modeled.",
         "Revenue assumes subscribed households; collections use paid enrollment and calendar-month payments, independently of supply. Refunds and service-dependent billing are not modeled.",
@@ -133,9 +141,16 @@ def _calculate(snapshot):
         warnings.append("Water uses assumed constant crop demand and weekly storage/pumping budgets, not weather/ET or daily peak checks. Labour uses explicit task-rate assumptions.")
         warnings.append("Resource shortfalls do not automatically reduce yield or hire workers; missing crop stress/hiring rules remain explicit constraints.")
         if None in resource_states:
-            warnings.append("Some active cohorts have unknown water or labour requirements. Their capacity checks remain incomplete.")
-        if water_deficit_weeks or labour_deficit_weeks:
-            warnings.append("Water or labour capacity is exceeded; projected basket fulfillment alone does not establish feasibility.")
+            warnings.append("Some crop requirements or nutrient sources are unknown. Capacity checks remain incomplete.")
+        if water_deficit_weeks or labour_deficit_weeks or nutrient_deficit_weeks:
+            warnings.append("Resource capacity is exceeded; projected basket fulfillment alone does not establish feasibility.")
+    if settings.get("nutrients"):
+        warnings.append("N/P/K is elemental kg. Compost availability is assumed in the allocation week; no maturation, mineralization, soil losses or uptake timing is modeled. Mulch/feed/fuel receive no automatic crop nutrient credit.")
+        warnings.append("Nutrient removal uses gross harvest, including grading/postharvest losses. Tracked-pool deficits do not automatically reduce yield; this is an availability/removal ledger, not a validated soil model.")
+        if any(lot["source_kind"] == "imported_manure" for lot in settings["nutrients"]["lots"]):
+            warnings.append("Manure/slurry hygiene and food safety require separate review; dry-mass nutrient accounting does not establish safe application.")
+    else:
+        warnings.append("Nutrient and biomass budgets are not assessed.")
     if not inputs["plantings"]:
         warnings.append("No planting cohorts supplied: forecast harvest is zero, not an estimate of farm capacity.")
     if D(inputs["monthly_fixed_opex_inr"]) == 0:
@@ -152,6 +167,7 @@ def _calculate(snapshot):
             "collection_policy": "Full monthly payment on the first day of each calendar month", "storage_policy": "none; weekly surplus is not carried forward",
             "solar_validated": False, "confidence": "user assumptions unless documented per planting"},
         "light_adjustments": {id: display(factor, 6) for id, factor in factors.items()},
+        "biomass": resource_display(biomass_summary(inputs)),
         "baseline": {"annual_delivered_demand_kg": display(demand * 52, 3),
             "annual_gross_target_kg": display(demand * 52 / (1 - loss), 3),
             "annual_subscription_revenue_inr": display(annual_revenue),
@@ -166,6 +182,7 @@ def _calculate(snapshot):
             "additional_funding_required_inr": display(max(ZERO, -minimum_cash)),
             "water_deficit_weeks": water_deficit_weeks if settings.get("water") else None,
             "labour_deficit_weeks": labour_deficit_weeks if settings.get("labour") else None,
+            "nutrient_deficit_weeks": nutrient_deficit_weeks if settings.get("nutrients") else None,
             "resource_constraints_met": False if False in resource_states else None if not resource_states or None in resource_states else True,
             "agronomic_feasibility": "not_assessed"},
         "crop_gross_totals_kg": {crop: display(amount, 3) for crop, amount in sorted(crop_totals.items())},

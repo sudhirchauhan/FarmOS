@@ -1,7 +1,8 @@
 # FarmOS
 
 Django + React planning core for the [product specification](docs/FarmOS_Product_Requirements_Specification.md).
-See the [vertical-slice plan](docs/implementation-plan.md) and [JPG/GIF mockups](docs/mockups/README.md).
+See the [task list](TASKS.md), [vertical-slice plan](docs/implementation-plan.md)
+and [JPG/GIF mockups](docs/mockups/README.md).
 
 ## Implemented
 
@@ -20,9 +21,11 @@ See the [vertical-slice plan](docs/implementation-plan.md) and [JPG/GIF mockups]
   explicit linear DLI response curves and immutable provenance snapshots.
 - Weekly water conservation, labour-capacity budgets, unknown-input flags and
   resource shortfall reports with CSV export.
+- Exclusive dry-biomass allocations and an available elemental N/P/K ledger,
+  with unknown composition/removal flags, conservation checks and nutrient CSV export.
 
 All results are provisional. Solar/PAR/DLI can constrain unshaded crop potential
-through user-assumed curves. Canopy growth, calibrated crop parameters, nutrient/biomass feasibility,
+through user-assumed curves. Canopy growth, calibrated crop parameters, soil mineralization/uptake,
 10-year financials, optimization and operations are subsequent slices.
 Subscription revenue and collections are independent of fulfilled supply; refund
 and service-dependent billing rules are not yet modeled. Zero costs generate a warning.
@@ -104,6 +107,7 @@ precision, so displayed weekly totals may differ slightly from rounded aggregate
 - `POST /api/scenario-runs/` with `{"scenario": "uuid"}`; `GET` list/detail
 - `GET /api/scenario-runs/{id}/weekly-export/`
 - `GET /api/scenario-runs/{id}/resource-export/`
+- `GET /api/scenario-runs/{id}/nutrient-export/`
 - `GET /api/scenario-runs/comparison/?run={uuid}&run={uuid}` (2–4 distinct runs)
 - `GET /api/health/`
 - `POST /api/solar-runs/`, `GET /api/solar-runs/{id}/` — immutable standalone light studies.
@@ -173,5 +177,33 @@ extra hiring or wages are not silently introduced.
 Blank crop resource requirements stay unknown rather than zero. Capacity results
 are `true`, `false` or `null` (incomplete/not assessed). Water/labour deficits are
 constraints and do not invent another yield penalty without a response rule.
-Nutrients, root competition, calibrated curves and combined-stress validation remain
-outstanding before agronomic feasibility claims.
+Root competition, calibrated curves, soil-process validation and combined-stress
+behavior remain outstanding before agronomic feasibility claims.
+
+## Nutrient and biomass ledger (engine 0.3)
+
+Enable `resources.nutrients` with opening available elemental N/P/K in kg and an
+`opening_source_note`. `lots` record a stable ID, name, source kind/note, availability
+week, dry mass, elemental concentration in g/dry kg and available fractions.
+`allocations` assign dry mass from a lot to a week and one purpose: compost, mulch,
+feed, fuel or reserve. Across all weeks/purposes, total assigned mass cannot exceed
+the batch; allocations before availability are rejected. Reserve is earmarked mass,
+not simultaneously usable elsewhere. The report retains unallocated mass.
+
+Only compost receives nutrient credit: dry kg × g/dry kg ÷1000 × available fraction.
+The fraction is assumed immediately available in the allocation week. Other purposes
+receive no automatic nutrient credit; manure/slurry volume is never converted into
+fertilizer equivalence. Nutrients use elemental P/K, not P₂O₅/K₂O equivalents.
+
+Crop `n_removal_g_per_gross_kg`, `p_removal_g_per_gross_kg` and
+`k_removal_g_per_gross_kg` determine removal requirements from gross harvest, including
+grading/postharvest losses. Opening pool + available inputs − tracked pool used =
+closing pool. Pools do not become negative; insufficient stock is a separate shortfall
+and no extra yield penalty is invented. Unknown supply leaves the capacity check
+incomplete even when a known-pool shortfall exists. Unknown crop removal stays unknown.
+
+This is a harvest-export ledger, not a validated soil model. Mineralization, uptake
+timing, soil losses, maturation and biomass transformations are not simulated. Material
+purchase costs remain separate explicit financial assumptions. Provenance is included
+in immutable scenario snapshots. The 312-row nutrient CSV contains N/P/K for all 104
+weeks and distinguishes unknown checks from known deficits.

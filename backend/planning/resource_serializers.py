@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .fields import StrictSerializer, number
+from .nutrient_serializers import NutrientInputs
 
 
 class LightResponse(StrictSerializer):
@@ -50,8 +51,9 @@ class LabourInputs(StrictSerializer):
 class ResourceInputs(StrictSerializer):
     water = WaterInputs(required=False)
     labour = LabourInputs(required=False)
+    nutrients = NutrientInputs(required=False)
 
     def validate(self, attrs):
         if not attrs:
-            raise serializers.ValidationError("Enable water or labour with explicit assumptions.")
+            raise serializers.ValidationError("Enable water, labour or nutrients with explicit assumptions.")
         return attrs
