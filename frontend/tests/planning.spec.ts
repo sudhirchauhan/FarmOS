@@ -1,0 +1,52 @@
+import { expect, test } from '@playwright/test';
+
+test('create a weekly plan, reload saved assumptions and compare an alternative', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: /Plan the farm/ })).toBeVisible();
+  await expect(page.locator('.error[role="alert"]')).toHaveCount(0);
+  await page.getByLabel('Farm name', { exact: true }).fill(`Browser test ${Date.now()}`);
+  await page.getByLabel('First planning day').fill('2026-01-01');
+  await page.getByRole('button', { name: '+ Add cohort' }).click();
+  await page.getByLabel('Crop / variety').fill('Spinach');
+  await page.getByLabel('Sowing / transplant date').fill('2025-12-01');
+  await page.getByLabel('First harvest date').fill('2026-01-01');
+  await page.getByLabel('Gross cycle yield').fill('5');
+  await page.getByRole('button', { name: 'Save and calculate 104 weeks' }).click();
+  await expect(page.getByRole('link', { name: 'Download weekly CSV' })).toBeVisible();
+  const results = page.locator('#results');
+  await expect(results).toContainText('20,800 kg');
+  await expect(results).toContainText('26,000 kg');
+  await expect(results).toContainText('₹33,00,000');
+  const firstWeek = results.locator('tbody tr').first();
+  await expect(firstWeek).toContainText('125');
+  await expect(firstWeek).toContainText('300');
+  await results.locator('select').selectOption('leafy');
+  await expect(firstWeek.locator('td').nth(4)).toHaveText('0');
+  await page.reload();
+  await page.getByRole('button', { name: 'Use as draft' }).first().click();
+  await expect(page.getByLabel('Crop / variety')).toHaveValue('Spinach');
+  await page.getByLabel('Physical land').fill('1');
+  await page.getByLabel('Subscription ₹ / household / month').fill('6000');
+  await page.getByRole('button', { name: 'Save and calculate 104 weeks' }).click();
+  await expect(results).toContainText('₹36,00,000');
+  await expect(results.getByRole('heading', { level: 2 })).toContainText('1 acre');
+  await page.getByRole('checkbox').nth(0).check();
+  await page.getByRole('checkbox').nth(1).check();
+  await page.getByRole('button', { name: 'Compare selected (2/4)' }).click();
+  await expect(page.getByRole('columnheader', { name: 'Δ delivered kg' })).toBeVisible();
+  await expect(page.locator('.error[role="alert"]')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test('overbooked plantings produce a useful error without a saved run', async ({ page }) => {
+  await page.goto('/');
+  await page.getByLabel('Farm name', { exact: true }).fill(`Browser test invalid ${Date.now()}`);
+  await page.getByRole('button', { name: '+ Add cohort' }).click();
+  await page.getByLabel('Crop / variety').fill('Spinach');
+  await page.getByLabel('Exclusive annual bed footprint').fill('50');
+  await page.getByRole('button', { name: 'Save and calculate 104 weeks' }).click();
+  await expect(page.locator('.error[role="alert"]')).toContainText('overbooked');
+  await expect(page.getByRole('link', { name: 'Download weekly CSV' })).toHaveCount(0);
+});

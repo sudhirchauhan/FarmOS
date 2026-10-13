@@ -1,0 +1,11 @@
+import { chromium } from 'playwright';
+import { existsSync } from 'node:fs';
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined) });
+const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+await page.goto((process.env.FARMOS_E2E_URL || 'http://127.0.0.1:3000') + '/sunlight');
+await page.getByRole('button', { name: 'Calculate and save light budget' }).click();
+await page.getByRole('heading', { name: 'Computed light budget' }).waitFor();
+await page.locator('#solar-results details').last().evaluate(element => element.removeAttribute('open'));
+await page.locator('#solar-results').screenshot({ path: '../docs/mockups/16-sunlight-lab-implemented.jpg', type: 'jpeg', quality: 92 });
+await browser.close();
+console.log('Saved actual calculated sunlight interface JPG. A solar run is retained in the development database.');

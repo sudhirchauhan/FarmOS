@@ -66,3 +66,17 @@ node docs/mockups/render-full-mockups.mjs
 
 The renderer loads the self-contained HTML and does not require a running API
 or modify farm/scenario data. Authentication and user management remain deferred.
+
+## Implemented sunlight interface
+
+[Computed sunlight lab JPG](16-sunlight-lab-implemented.jpg) shows the actual
+`/sunlight` interface with calculated values from the new light engine. This is
+separate from the schematic animations above. The engine models opaque boxes and
+isotropic diffuse radiation; it does not infer crop yield or calibrated canopy behavior.
+To regenerate with both servers running, from `frontend/`:
+
+```bash
+node scripts/render-sunlight.mjs
+```
+
+This calculation creates a retained solar study in the local development database.
